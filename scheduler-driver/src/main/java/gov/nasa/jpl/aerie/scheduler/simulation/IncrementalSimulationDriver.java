@@ -2,7 +2,9 @@ package gov.nasa.jpl.aerie.scheduler.simulation;
 
 import gov.nasa.jpl.aerie.merlin.driver.ActivityInstanceId;
 import gov.nasa.jpl.aerie.merlin.driver.MissionModel;
+import gov.nasa.jpl.aerie.merlin.driver.ResourceTracker;
 import gov.nasa.jpl.aerie.merlin.driver.SerializedActivity;
+import gov.nasa.jpl.aerie.merlin.driver.SimulationDriver;
 import gov.nasa.jpl.aerie.merlin.driver.SimulationResults;
 import gov.nasa.jpl.aerie.merlin.driver.engine.SimulationEngine;
 import gov.nasa.jpl.aerie.merlin.driver.engine.TaskId;
@@ -28,6 +30,7 @@ public class IncrementalSimulationDriver<Model> {
   private SimulationEngine engine = new SimulationEngine();
   private LiveCells cells;
   private TemporalEventSource timeline = new TemporalEventSource();
+  private ResourceTracker resourceTracker = new ResourceTracker();
   private final MissionModel<Model> missionModel;
 
   private final Topic<ActivityInstanceId> activityTopic = new Topic<>();
@@ -62,6 +65,8 @@ public class IncrementalSimulationDriver<Model> {
     /* The top-level simulation timeline. */
     this.timeline = new TemporalEventSource();
     this.cells = new LiveCells(timeline, missionModel.getInitialCells());
+    this.resourceTracker = new ResourceTracker();
+
     /* The current real time. */
     curTime = Duration.ZERO;
 
@@ -69,7 +74,7 @@ public class IncrementalSimulationDriver<Model> {
     for (final var entry : missionModel.getResources().entrySet()) {
       final var name = entry.getKey();
       final var resource = entry.getValue();
-      engine.trackResource(name, resource, curTime);
+      resourceTracker.track(name, resource);
     }
 
     // Start daemon task(s) immediately, before anything else happens.
@@ -79,6 +84,7 @@ public class IncrementalSimulationDriver<Model> {
       final var batch = engine.extractNextJobs(Duration.MAX_VALUE);
       final var commit = engine.performJobs(batch.jobs(), cells, curTime, Duration.MAX_VALUE);
       timeline.add(commit);
+      resourceTracker.invalidateTopics(SimulationDriver.extractTopics(commit));
     }
   }
 
@@ -87,17 +93,26 @@ public class IncrementalSimulationDriver<Model> {
     assert(endTime.noShorterThan(curTime));
     while (true) {
       final var batch = engine.extractNextJobs(Duration.MAX_VALUE);
-      // Increment real time, if necessary.
-      if(batch.offsetFromStart().longerThan(endTime) || endTime.isEqualTo(Duration.MAX_VALUE)){
-        break;
-      }
       final var delta = batch.offsetFromStart().minus(curTime);
       curTime = batch.offsetFromStart();
-      timeline.add(delta);
+
+      if (delta.longerThan(Duration.ZERO) && curTime.minus(delta).isEqualTo(Duration.ZERO)) {
+        resourceTracker.updateAllResourcesAt(Duration.ZERO, cells);
+      }
+
+      if (batch.offsetFromStart().longerThan(endTime) || endTime.isEqualTo(Duration.MAX_VALUE)){
+        resourceTracker.updateResources(curTime, delta, cells, timeline, true);
+        break;
+      }
+
+      if (delta.longerThan(Duration.ZERO)) {
+        resourceTracker.updateResources(curTime, delta, cells, timeline, false);
+      }
+
       // Run the jobs in this batch.
       final var commit = engine.performJobs(batch.jobs(), cells, curTime, Duration.MAX_VALUE);
       timeline.add(commit);
-
+      resourceTracker.invalidateTopics(SimulationDriver.extractTopics(commit));
     }
     lastSimResults = null;
   }
@@ -165,7 +180,8 @@ public class IncrementalSimulationDriver<Model> {
           endTime,
           activityTopic,
           timeline,
-          missionModel.getTopics());
+          missionModel.getTopics(),
+          resourceTracker.resourceProfiles());
       lastSimResultsEnd = endTime;
       //while sim results may not be up to date with curTime, a regeneration has taken place after the last insertion
     }

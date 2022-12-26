@@ -1,8 +1,6 @@
 package gov.nasa.jpl.aerie.merlin.driver;
 
 import gov.nasa.jpl.aerie.merlin.driver.engine.SimulationEngine;
-import gov.nasa.jpl.aerie.merlin.driver.timeline.Event;
-import gov.nasa.jpl.aerie.merlin.driver.timeline.EventGraph;
 import gov.nasa.jpl.aerie.merlin.driver.timeline.LiveCells;
 import gov.nasa.jpl.aerie.merlin.driver.timeline.TemporalEventSource;
 import gov.nasa.jpl.aerie.merlin.protocol.driver.Topic;
@@ -32,6 +30,7 @@ public final class SimulationDriver {
       var elapsedTime = Duration.ZERO;
 
       final var resourceTracker = new ResourceTracker();
+      final var timelineIterator = timeline.iterator();
 
       // Begin tracking all resources.
       for (final var entry : missionModel.getResources().entrySet()) {
@@ -46,7 +45,7 @@ public final class SimulationDriver {
         final var batch = engine.extractNextJobs(Duration.MAX_VALUE);
         final var commit = engine.performJobs(batch.jobs(), cells, elapsedTime, Duration.MAX_VALUE);
         timeline.add(commit);
-        resourceTracker.invalidateTopics(extractTopics(commit));
+        resourceTracker.invalidateTopics(((TemporalEventSource.TimePoint.Commit) timelineIterator.next()).topics());
       }
 
       // Specify a topic on which tasks can log the activity they're associated with.
@@ -98,11 +97,11 @@ public final class SimulationDriver {
         final var commit = engine.performJobs(batch.jobs(), cells, elapsedTime, simulationDuration);
         timeline.add(commit);
 
-        resourceTracker.invalidateTopics(extractTopics(commit));
+        resourceTracker.invalidateTopics(((TemporalEventSource.TimePoint.Commit) timelineIterator.next()).topics());
       }
 
       final var topics = missionModel.getTopics();
-      return SimulationEngine.computeResults(engine, startTime, elapsedTime, activityTopic, timeline, topics, resourceTracker.resourceProfiles);
+      return SimulationEngine.computeResults(engine, startTime, elapsedTime, activityTopic, timeline, topics, resourceTracker.resourceProfiles());
     }
   }
 
@@ -151,20 +150,6 @@ public final class SimulationDriver {
       scheduler.emit(event, topic);
       return continuation.create(executor).step(scheduler);
     };
-  }
-
-  private static Set<Topic<?>> extractTopics(EventGraph<Event> graph) {
-    if (graph instanceof EventGraph.Empty<Event>) {
-      return Set.of();
-    } else if (graph instanceof EventGraph.Atom<Event> g) {
-      return Set.of(g.atom().topic());
-    } else if (graph instanceof EventGraph.Sequentially<Event> g) {
-      return union(extractTopics(g.prefix()), extractTopics(g.suffix()));
-    } else if (graph instanceof EventGraph.Concurrently<Event> g) {
-      return union(extractTopics(g.left()), extractTopics(g.right()));
-    } else {
-      throw new Error("Unhandled variant of EventGraph: " + graph);
-    }
   }
 
   private static <E> Set<E> union(Set<E> a, Set<E> b) {

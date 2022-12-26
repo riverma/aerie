@@ -17,23 +17,23 @@ import java.util.Map;
 import java.util.Set;
 
 public class ResourceTracker {
-  final Map<String, Resource<?>> resources = new HashMap<>();
-  final Map<String, ProfilingState<?>> resourceProfiles = new HashMap<>();
+  private final Map<String, Resource<?>> resources = new HashMap<>();
+  private final Map<String, ProfilingState<?>> resourceProfiles = new HashMap<>();
 
   /** The set of queries depending on a given set of topics. */
-  final Subscriptions<Topic<?>, String> waitingResources = new Subscriptions<>();
+  private final Subscriptions<Topic<?>, String> waitingResources = new Subscriptions<>();
 
-  final Map<String, Duration> resourceExpiries = new HashMap<>();
+  private final Map<String, Duration> resourceExpiries = new HashMap<>();
 
-  final Set<Topic<?>> invalidatedTopics = new HashSet<>();
+  private final Set<Topic<?>> invalidatedTopics = new HashSet<>();
 
 
-  void track(final String name, final Resource<?> resource) {
+  public void track(final String name, final Resource<?> resource) {
     resourceProfiles.put(name, new ProfilingState<>(resource, new Profile<>()));
     resources.put(name, resource);
   }
 
-  void updateAllResourcesAt(final Duration currentTime, final LiveCells cells) {
+  public void updateAllResourcesAt(final Duration currentTime, final LiveCells cells) {
     invalidatedTopics.clear();
 
     for (final var entry : resources.entrySet()) {
@@ -56,12 +56,15 @@ public class ResourceTracker {
   /**
    * Post condition: timeline will be stepped up to the endpoint
    */
-  void updateResources(final Duration currentTime, final Duration delta, final LiveCells cells, final TemporalEventSource timeline, final boolean includeEndpoint) {
+  public void updateResources(final Duration currentTime, final Duration delta, final LiveCells cells, final TemporalEventSource timeline, final boolean includeEndpoint) {
     updateInvalidatedResources(currentTime, cells, timeline);
     updateExpiredResources(currentTime, delta, cells, timeline, includeEndpoint);
   }
 
-  void updateInvalidatedResources(final Duration elapsedTime, final LiveCells cells, final TemporalEventSource timeline) {
+  private void updateInvalidatedResources(
+      final Duration elapsedTime,
+      final LiveCells cells,
+      final TemporalEventSource timeline) {
     final var invalidatedResources = new HashSet<String>();
 
     for (final var topic : invalidatedTopics) {
@@ -130,7 +133,11 @@ public class ResourceTracker {
     timeline.add(endTime.minus(currentTime));
   }
 
-  void invalidateTopics(final Set<Topic<?>> topics) {
+  public void invalidateTopics(final Set<Topic<?>> topics) {
     invalidatedTopics.addAll(topics);
+  }
+
+  public Map<String, ProfilingState<?>> resourceProfiles() {
+    return resourceProfiles;
   }
 }
