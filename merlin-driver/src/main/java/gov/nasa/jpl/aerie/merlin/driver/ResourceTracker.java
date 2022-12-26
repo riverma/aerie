@@ -13,6 +13,7 @@ import gov.nasa.jpl.aerie.merlin.protocol.types.Duration;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 
@@ -29,10 +30,12 @@ public class ResourceTracker {
 
   private final TemporalEventSource timeline;
   private final LiveCells cells;
+  private final Iterator<TemporalEventSource.TimePoint> timelineIterator;
 
   public ResourceTracker(final TemporalEventSource timeline, final LiveCells initialCells) {
     this.timeline = timeline;
     this.cells = new LiveCells(timeline, initialCells);
+    this.timelineIterator = timeline.iterator();
   }
 
 
@@ -41,7 +44,7 @@ public class ResourceTracker {
     resources.put(name, resource);
   }
 
-  public void updateAllResourcesAt(final Duration currentTime, final LiveCells cells) {
+  public void updateAllResourcesAt(final Duration currentTime) {
     invalidatedTopics.clear();
 
     for (final var entry : resources.entrySet()) {
@@ -64,15 +67,23 @@ public class ResourceTracker {
   /**
    * Post condition: timeline will be stepped up to the endpoint
    */
-  public void updateResources(final Duration currentTime, final Duration delta, final LiveCells cells, final TemporalEventSource timeline, final boolean includeEndpoint) {
-    updateInvalidatedResources(currentTime, cells, timeline);
-    updateExpiredResources(currentTime, delta, cells, timeline, includeEndpoint);
+  public void updateResources(final Duration currentTime, final Duration delta, final boolean includeEndpoint) {
+    while (timelineIterator.hasNext()) {
+      final var timePoint = timelineIterator.next();
+      if (timePoint instanceof TemporalEventSource.TimePoint.Delta) {
+        continue;
+      } else if (timePoint instanceof TemporalEventSource.TimePoint.Commit p) {
+        invalidatedTopics.addAll(p.topics());
+      } else {
+        throw new Error("Unhandled variant of " + TemporalEventSource.TimePoint.class.getCanonicalName() + ": " + timePoint);
+      }
+    }
+
+    updateInvalidatedResources(currentTime);
+    updateExpiredResources(currentTime, delta, includeEndpoint);
   }
 
-  private void updateInvalidatedResources(
-      final Duration elapsedTime,
-      final LiveCells cells,
-      final TemporalEventSource timeline) {
+  private void updateInvalidatedResources(final Duration elapsedTime) {
     final var invalidatedResources = new HashSet<String>();
 
     for (final var topic : invalidatedTopics) {
@@ -96,7 +107,7 @@ public class ResourceTracker {
     }
   }
 
-  private void updateExpiredResources(final Duration startTime, final Duration delta, final LiveCells cells, final TemporalEventSource timeline, final boolean includeEndpoint) {
+  private void updateExpiredResources(final Duration startTime, final Duration delta, final boolean includeEndpoint) {
     final var endTime = startTime.plus(delta);
     var currentTime = startTime;
     while (true) {

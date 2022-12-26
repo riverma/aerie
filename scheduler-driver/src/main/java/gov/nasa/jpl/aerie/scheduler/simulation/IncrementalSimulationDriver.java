@@ -97,7 +97,7 @@ public class IncrementalSimulationDriver<Model> {
       curTime = batch.offsetFromStart();
 
       if (delta.longerThan(Duration.ZERO) && curTime.minus(delta).isEqualTo(Duration.ZERO)) {
-        resourceTracker.updateAllResourcesAt(Duration.ZERO, cells);
+        resourceTracker.updateAllResourcesAt(Duration.ZERO);
       }
 
       if (batch.offsetFromStart().longerThan(endTime) || endTime.isEqualTo(Duration.MAX_VALUE)){

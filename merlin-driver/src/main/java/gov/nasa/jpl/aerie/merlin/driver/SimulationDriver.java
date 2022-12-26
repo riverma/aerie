@@ -29,7 +29,6 @@ public final class SimulationDriver {
       var elapsedTime = Duration.ZERO;
 
       final var resourceTracker = new ResourceTracker(timeline, missionModel.getInitialCells());
-      final var timelineIterator = timeline.iterator();
 
       // Begin tracking all resources.
       for (final var entry : missionModel.getResources().entrySet()) {
@@ -43,7 +42,6 @@ public final class SimulationDriver {
       {
         final var batch = engine.extractNextJobs(Duration.MAX_VALUE);
         engine.performJobs(batch.jobs(), elapsedTime, Duration.MAX_VALUE);
-        resourceTracker.invalidateTopics(((TemporalEventSource.TimePoint.Commit) timelineIterator.next()).topics());
       }
 
       // Specify a topic on which tasks can log the activity they're associated with.
@@ -79,22 +77,20 @@ public final class SimulationDriver {
         //   even if they occur at the same real time.
 
         if (delta.longerThan(Duration.ZERO) && elapsedTime.minus(delta).isEqualTo(Duration.ZERO)) {
-          resourceTracker.updateAllResourcesAt(Duration.ZERO, cells);
+          resourceTracker.updateAllResourcesAt(Duration.ZERO);
         }
 
         if (batch.jobs().isEmpty() && batch.offsetFromStart().isEqualTo(simulationDuration)) {
-          resourceTracker.updateResources(elapsedTime.minus(delta), delta, cells, timeline, true);
+          resourceTracker.updateResources(elapsedTime.minus(delta), delta, true);
           break;
         }
 
         if (delta.longerThan(Duration.ZERO)) {
-          resourceTracker.updateResources(elapsedTime.minus(delta), delta, cells, timeline, false);
+          resourceTracker.updateResources(elapsedTime.minus(delta), delta, false);
         }
 
         // Run the jobs in this batch.
         engine.performJobs(batch.jobs(), elapsedTime, simulationDuration);
-
-        resourceTracker.invalidateTopics(((TemporalEventSource.TimePoint.Commit) timelineIterator.next()).topics());
       }
 
       final var topics = missionModel.getTopics();
@@ -104,10 +100,10 @@ public final class SimulationDriver {
 
   public static <Model, Return>
   void simulateTask(final MissionModel<Model> missionModel, final TaskFactory<Return> task) {
-    try (final var engine = new SimulationEngine()) {
-      /* The top-level simulation timeline. */
-      var timeline = new TemporalEventSource();
-      var cells = new LiveCells(timeline, missionModel.getInitialCells());
+    /* The top-level simulation timeline. */
+    var timeline = new TemporalEventSource();
+    var cells = new LiveCells(timeline, missionModel.getInitialCells());
+    try (final var engine = new SimulationEngine(timeline, cells)) {
       /* The current real time. */
       var elapsedTime = Duration.ZERO;
 
@@ -115,8 +111,7 @@ public final class SimulationDriver {
       engine.scheduleTask(Duration.ZERO, missionModel.getDaemon());
       {
         final var batch = engine.extractNextJobs(Duration.MAX_VALUE);
-        final var commit = engine.performJobs(batch.jobs(), cells, elapsedTime, Duration.MAX_VALUE);
-        timeline.add(commit);
+        engine.performJobs(batch.jobs(), elapsedTime, Duration.MAX_VALUE);
       }
 
       // Schedule all activities.
@@ -135,8 +130,7 @@ public final class SimulationDriver {
         //   even if they occur at the same real time.
 
         // Run the jobs in this batch.
-        final var commit = engine.performJobs(batch.jobs(), cells, elapsedTime, Duration.MAX_VALUE);
-        timeline.add(commit);
+        engine.performJobs(batch.jobs(), elapsedTime, Duration.MAX_VALUE);
       }
     }
   }
