@@ -71,6 +71,15 @@ public final class SimulationEngine implements AutoCloseable {
   /** A thread pool that modeled tasks can use to keep track of their state between steps. */
   private final ExecutorService executor = getLoomOrFallback();
 
+  /** TODO */
+  private final TemporalEventSource timeline;
+  private final LiveCells cells;
+
+  public SimulationEngine(final TemporalEventSource timeline, final LiveCells initialCells) {
+    this.timeline = timeline;
+    this.cells = new LiveCells(timeline, initialCells);
+  }
+
   private static ExecutorService getLoomOrFallback() {
     // Try to use Loom's lightweight virtual threads, if possible. Otherwise, just use a thread pool.
     // This approach is inspired by that of Javalin 5.
@@ -134,20 +143,19 @@ public final class SimulationEngine implements AutoCloseable {
   }
 
   /** Performs a collection of tasks concurrently, extending the given timeline by their stateful effects. */
-  public EventGraph<Event> performJobs(
+  public void performJobs(
       final Collection<JobId> jobs,
-      final LiveCells context,
       final Duration currentTime,
       final Duration maximumTime
   ) {
     var tip = EventGraph.<Event>empty();
     for (final var job$ : jobs) {
-      tip = EventGraph.concurrently(tip, TaskFrame.run(job$, context, (job, frame) -> {
+      tip = EventGraph.concurrently(tip, TaskFrame.run(job$, this.cells, (job, frame) -> {
         this.performJob(job, frame, currentTime, maximumTime);
       }));
     }
 
-    return tip;
+    this.timeline.add(tip);
   }
 
   /** Performs a single job. */

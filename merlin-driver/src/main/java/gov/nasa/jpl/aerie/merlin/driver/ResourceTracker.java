@@ -27,6 +27,14 @@ public class ResourceTracker {
 
   private final Set<Topic<?>> invalidatedTopics = new HashSet<>();
 
+  private final TemporalEventSource timeline;
+  private final LiveCells cells;
+
+  public ResourceTracker(final TemporalEventSource timeline, final LiveCells initialCells) {
+    this.timeline = timeline;
+    this.cells = new LiveCells(timeline, initialCells);
+  }
+
 
   public void track(final String name, final Resource<?> resource) {
     resourceProfiles.put(name, new ProfilingState<>(resource, new Profile<>()));

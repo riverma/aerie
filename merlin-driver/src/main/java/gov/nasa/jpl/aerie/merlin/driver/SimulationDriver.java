@@ -22,14 +22,13 @@ public final class SimulationDriver {
       final Instant startTime,
       final Duration simulationDuration
   ) {
-    try (final var engine = new SimulationEngine()) {
-      /* The top-level simulation timeline. */
-      var timeline = new TemporalEventSource();
-      var cells = new LiveCells(timeline, missionModel.getInitialCells());
+    /* The top-level simulation timeline. */
+    var timeline = new TemporalEventSource();
+    try (final var engine = new SimulationEngine(timeline, missionModel.getInitialCells())) {
       /* The current real time. */
       var elapsedTime = Duration.ZERO;
 
-      final var resourceTracker = new ResourceTracker();
+      final var resourceTracker = new ResourceTracker(timeline, missionModel.getInitialCells());
       final var timelineIterator = timeline.iterator();
 
       // Begin tracking all resources.
@@ -43,8 +42,7 @@ public final class SimulationDriver {
       engine.scheduleTask(Duration.ZERO, missionModel.getDaemon());
       {
         final var batch = engine.extractNextJobs(Duration.MAX_VALUE);
-        final var commit = engine.performJobs(batch.jobs(), cells, elapsedTime, Duration.MAX_VALUE);
-        timeline.add(commit);
+        engine.performJobs(batch.jobs(), elapsedTime, Duration.MAX_VALUE);
         resourceTracker.invalidateTopics(((TemporalEventSource.TimePoint.Commit) timelineIterator.next()).topics());
       }
 
@@ -94,8 +92,7 @@ public final class SimulationDriver {
         }
 
         // Run the jobs in this batch.
-        final var commit = engine.performJobs(batch.jobs(), cells, elapsedTime, simulationDuration);
-        timeline.add(commit);
+        engine.performJobs(batch.jobs(), elapsedTime, simulationDuration);
 
         resourceTracker.invalidateTopics(((TemporalEventSource.TimePoint.Commit) timelineIterator.next()).topics());
       }
