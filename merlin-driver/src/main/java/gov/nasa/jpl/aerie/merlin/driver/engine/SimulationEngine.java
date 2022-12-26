@@ -30,7 +30,6 @@ import org.apache.commons.lang3.tuple.Triple;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -144,14 +143,13 @@ public final class SimulationEngine implements AutoCloseable {
 
   /** Performs a collection of tasks concurrently, extending the given timeline by their stateful effects. */
   public void performJobs(
-      final Collection<JobId> jobs,
-      final Duration currentTime,
+      final JobSchedule.Batch<JobId> batch,
       final Duration maximumTime
   ) {
     var tip = EventGraph.<Event>empty();
-    for (final var job$ : jobs) {
+    for (final var job$ : batch.jobs()) {
       tip = EventGraph.concurrently(tip, TaskFrame.run(job$, this.cells, (job, frame) -> {
-        this.performJob(job, frame, currentTime, maximumTime);
+        this.performJob(job, frame, batch.offsetFromStart(), maximumTime);
       }));
     }
 

@@ -41,7 +41,7 @@ public final class SimulationDriver {
       engine.scheduleTask(Duration.ZERO, missionModel.getDaemon());
       {
         final var batch = engine.extractNextJobs(Duration.MAX_VALUE);
-        engine.performJobs(batch.jobs(), elapsedTime, Duration.MAX_VALUE);
+        engine.performJobs(batch, Duration.MAX_VALUE);
       }
 
       // Specify a topic on which tasks can log the activity they're associated with.
@@ -67,30 +67,17 @@ public final class SimulationDriver {
 
       // Drive the engine until we're out of time.
       // TERMINATION: Actually, we might never break if real time never progresses forward.
+      // TODO: Advance a dense time counter so that future tasks are strictly ordered relative to these,
+      //   even if they occur at the same real time.
       while (true) {
         final var batch = engine.extractNextJobs(simulationDuration);
 
-        // Increment real time, if necessary.
-        final var delta = batch.offsetFromStart().minus(elapsedTime);
+        timeline.add(batch.offsetFromStart().minus(elapsedTime));
+        engine.performJobs(batch, simulationDuration);
+        resourceTracker.updateResources();
+
         elapsedTime = batch.offsetFromStart();
-        // TODO: Advance a dense time counter so that future tasks are strictly ordered relative to these,
-        //   even if they occur at the same real time.
-
-        if (delta.longerThan(Duration.ZERO) && elapsedTime.minus(delta).isEqualTo(Duration.ZERO)) {
-          resourceTracker.updateAllResourcesAt(Duration.ZERO);
-        }
-
-        if (batch.jobs().isEmpty() && batch.offsetFromStart().isEqualTo(simulationDuration)) {
-          resourceTracker.updateResources(elapsedTime.minus(delta), delta, true);
-          break;
-        }
-
-        if (delta.longerThan(Duration.ZERO)) {
-          resourceTracker.updateResources(elapsedTime.minus(delta), delta, false);
-        }
-
-        // Run the jobs in this batch.
-        engine.performJobs(batch.jobs(), elapsedTime, simulationDuration);
+        if (batch.jobs().isEmpty()) break;
       }
 
       final var topics = missionModel.getTopics();
@@ -111,7 +98,7 @@ public final class SimulationDriver {
       engine.scheduleTask(Duration.ZERO, missionModel.getDaemon());
       {
         final var batch = engine.extractNextJobs(Duration.MAX_VALUE);
-        engine.performJobs(batch.jobs(), elapsedTime, Duration.MAX_VALUE);
+        engine.performJobs(batch, Duration.MAX_VALUE);
       }
 
       // Schedule all activities.
@@ -119,18 +106,14 @@ public final class SimulationDriver {
 
       // Drive the engine until we're out of time.
       // TERMINATION: Actually, we might never break if real time never progresses forward.
-      while (!engine.isTaskComplete(taskId)) {
+      while (true) {
         final var batch = engine.extractNextJobs(Duration.MAX_VALUE);
 
-        // Increment real time, if necessary.
-        final var delta = batch.offsetFromStart().minus(elapsedTime);
-        elapsedTime = batch.offsetFromStart();
-        timeline.add(delta);
-        // TODO: Advance a dense time counter so that future tasks are strictly ordered relative to these,
-        //   even if they occur at the same real time.
+        timeline.add(batch.offsetFromStart().minus(elapsedTime));
+        engine.performJobs(batch, Duration.MAX_VALUE);
 
-        // Run the jobs in this batch.
-        engine.performJobs(batch.jobs(), elapsedTime, Duration.MAX_VALUE);
+        elapsedTime = batch.offsetFromStart();
+        if (engine.isTaskComplete(taskId)) break;
       }
     }
   }
