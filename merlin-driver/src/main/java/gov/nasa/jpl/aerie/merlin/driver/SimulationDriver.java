@@ -1,6 +1,8 @@
 package gov.nasa.jpl.aerie.merlin.driver;
 
 import gov.nasa.jpl.aerie.merlin.driver.engine.SimulationEngine;
+import gov.nasa.jpl.aerie.merlin.driver.timeline.Event;
+import gov.nasa.jpl.aerie.merlin.driver.timeline.EventGraph;
 import gov.nasa.jpl.aerie.merlin.driver.timeline.LiveCells;
 import gov.nasa.jpl.aerie.merlin.driver.timeline.TemporalEventSource;
 import gov.nasa.jpl.aerie.merlin.protocol.driver.Topic;
@@ -10,7 +12,9 @@ import gov.nasa.jpl.aerie.merlin.protocol.types.InstantiationException;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 public final class SimulationDriver {
   public static <Model>
@@ -27,12 +31,13 @@ public final class SimulationDriver {
       /* The current real time. */
       var elapsedTime = Duration.ZERO;
 
+      final var resourceTracker = new ResourceTracker();
+
       // Begin tracking all resources.
       for (final var entry : missionModel.getResources().entrySet()) {
         final var name = entry.getKey();
         final var resource = entry.getValue();
-
-        engine.trackResource(name, resource, elapsedTime);
+        resourceTracker.track(name, resource);
       }
 
       // Start daemon task(s) immediately, before anything else happens.
@@ -41,6 +46,7 @@ public final class SimulationDriver {
         final var batch = engine.extractNextJobs(Duration.MAX_VALUE);
         final var commit = engine.performJobs(batch.jobs(), cells, elapsedTime, Duration.MAX_VALUE);
         timeline.add(commit);
+        resourceTracker.invalidateTopics(extractTopics(commit));
       }
 
       // Specify a topic on which tasks can log the activity they're associated with.
@@ -72,21 +78,31 @@ public final class SimulationDriver {
         // Increment real time, if necessary.
         final var delta = batch.offsetFromStart().minus(elapsedTime);
         elapsedTime = batch.offsetFromStart();
-        timeline.add(delta);
         // TODO: Advance a dense time counter so that future tasks are strictly ordered relative to these,
         //   even if they occur at the same real time.
 
+        if (delta.longerThan(Duration.ZERO) && elapsedTime.minus(delta).isEqualTo(Duration.ZERO)) {
+          resourceTracker.updateAllResourcesAt(Duration.ZERO, cells);
+        }
+
         if (batch.jobs().isEmpty() && batch.offsetFromStart().isEqualTo(simulationDuration)) {
+          resourceTracker.updateResources(elapsedTime.minus(delta), delta, cells, timeline, true);
           break;
+        }
+
+        if (delta.longerThan(Duration.ZERO)) {
+          resourceTracker.updateResources(elapsedTime.minus(delta), delta, cells, timeline, false);
         }
 
         // Run the jobs in this batch.
         final var commit = engine.performJobs(batch.jobs(), cells, elapsedTime, simulationDuration);
         timeline.add(commit);
+
+        resourceTracker.invalidateTopics(extractTopics(commit));
       }
 
       final var topics = missionModel.getTopics();
-      return SimulationEngine.computeResults(engine, startTime, elapsedTime, activityTopic, timeline, topics);
+      return SimulationEngine.computeResults(engine, startTime, elapsedTime, activityTopic, timeline, topics, resourceTracker.resourceProfiles);
     }
   }
 
@@ -98,14 +114,6 @@ public final class SimulationDriver {
       var cells = new LiveCells(timeline, missionModel.getInitialCells());
       /* The current real time. */
       var elapsedTime = Duration.ZERO;
-
-      // Begin tracking all resources.
-      for (final var entry : missionModel.getResources().entrySet()) {
-        final var name = entry.getKey();
-        final var resource = entry.getValue();
-
-        engine.trackResource(name, resource, elapsedTime);
-      }
 
       // Start daemon task(s) immediately, before anything else happens.
       engine.scheduleTask(Duration.ZERO, missionModel.getDaemon());
@@ -143,5 +151,25 @@ public final class SimulationDriver {
       scheduler.emit(event, topic);
       return continuation.create(executor).step(scheduler);
     };
+  }
+
+  private static Set<Topic<?>> extractTopics(EventGraph<Event> graph) {
+    if (graph instanceof EventGraph.Empty<Event>) {
+      return Set.of();
+    } else if (graph instanceof EventGraph.Atom<Event> g) {
+      return Set.of(g.atom().topic());
+    } else if (graph instanceof EventGraph.Sequentially<Event> g) {
+      return union(extractTopics(g.prefix()), extractTopics(g.suffix()));
+    } else if (graph instanceof EventGraph.Concurrently<Event> g) {
+      return union(extractTopics(g.left()), extractTopics(g.right()));
+    } else {
+      throw new Error("Unhandled variant of EventGraph: " + graph);
+    }
+  }
+
+  private static <E> Set<E> union(Set<E> a, Set<E> b) {
+    final var res = new HashSet<>(a);
+    res.addAll(b);
+    return res;
   }
 }

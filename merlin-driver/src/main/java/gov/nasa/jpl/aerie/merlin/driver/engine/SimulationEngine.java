@@ -56,15 +56,11 @@ public final class SimulationEngine implements AutoCloseable {
   private final Subscriptions<SignalId, TaskId> waitingTasks = new Subscriptions<>();
   /** The set of conditions depending on a given set of topics. */
   private final Subscriptions<Topic<?>, ConditionId> waitingConditions = new Subscriptions<>();
-  /** The set of queries depending on a given set of topics. */
-  private final Subscriptions<Topic<?>, ResourceId> waitingResources = new Subscriptions<>();
 
   /** The execution state for every task. */
   private final Map<TaskId, ExecutionState<?>> tasks = new HashMap<>();
   /** The getter for each tracked condition. */
   private final Map<ConditionId, Condition> conditions = new HashMap<>();
-  /** The profiling state for each tracked resource. */
-  private final Map<ResourceId, ProfilingState<?>> resources = new HashMap<>();
 
   /** The task that spawned a given task (if any). */
   private final Map<TaskId, TaskId> taskParent = new HashMap<>();
@@ -107,22 +103,8 @@ public final class SimulationEngine implements AutoCloseable {
     return task;
   }
 
-  /** Register a resource whose profile should be accumulated over time. */
-  public <Dynamics>
-  void trackResource(final String name, final Resource<Dynamics> resource, final Duration nextQueryTime) {
-    final var id = new ResourceId(name);
-
-    this.resources.put(id, ProfilingState.create(resource));
-    this.scheduledJobs.schedule(JobId.forResource(id), SubInstant.Resources.at(nextQueryTime));
-  }
-
-  /** Schedules any conditions or resources dependent on the given topic to be re-checked at the given time. */
+  /** Schedules any conditions dependent on the given topic to be re-checked at the given time. */
   public void invalidateTopic(final Topic<?> topic, final Duration invalidationTime) {
-    final var resources = this.waitingResources.invalidateTopic(topic);
-    for (final var resource : resources) {
-      this.scheduledJobs.schedule(JobId.forResource(resource), SubInstant.Resources.at(invalidationTime));
-    }
-
     final var conditions = this.waitingConditions.invalidateTopic(topic);
     for (final var condition : conditions) {
       // If we were going to signal tasks on this condition, well, don't do that.
@@ -181,8 +163,6 @@ public final class SimulationEngine implements AutoCloseable {
       this.stepSignalledTasks(j.id(), frame);
     } else if (job instanceof JobId.ConditionJobId j) {
       this.updateCondition(j.id(), frame, currentTime, maximumTime);
-    } else if (job instanceof JobId.ResourceJobId j) {
-      this.updateResource(j.id(), frame, currentTime);
     } else {
       throw new IllegalArgumentException("Unexpected subtype of %s: %s".formatted(JobId.class, job.getClass()));
     }
@@ -328,23 +308,6 @@ public final class SimulationEngine implements AutoCloseable {
     }
   }
 
-  /** Get the current behavior of a given resource and accumulate it into the resource's profile. */
-  public void updateResource(
-      final ResourceId resource,
-      final TaskFrame<JobId> frame,
-      final Duration currentTime
-  ) {
-    final var querier = new EngineQuerier(frame);
-    this.resources.get(resource).append(currentTime, querier);
-
-    this.waitingResources.subscribeQuery(resource, querier.referencedTopics);
-
-    final var expiry = querier.expiry.map(currentTime::plus);
-    if (expiry.isPresent()) {
-      this.scheduledJobs.schedule(JobId.forResource(resource), SubInstant.Resources.at(expiry.get()));
-    }
-  }
-
   /** Resets all tasks (freeing any held resources). The engine should not be used after being closed. */
   @Override
   public void close() {
@@ -447,7 +410,8 @@ public final class SimulationEngine implements AutoCloseable {
       final Duration elapsedTime,
       final Topic<ActivityInstanceId> activityTopic,
       final TemporalEventSource timeline,
-      final Iterable<SerializableTopic<?>> serializableTopics
+      final Iterable<SerializableTopic<?>> serializableTopics,
+      final Map<String, ProfilingState<?>> resources
   ) {
     // Collect per-task information from the event graph.
     final var taskInfo = new TaskInfo();
@@ -463,11 +427,10 @@ public final class SimulationEngine implements AutoCloseable {
     final var realProfiles = new HashMap<String, Pair<ValueSchema, List<ProfileSegment<RealDynamics>>>>();
     final var discreteProfiles = new HashMap<String, Pair<ValueSchema, List<ProfileSegment<SerializedValue>>>>();
 
-    for (final var entry : engine.resources.entrySet()) {
-      final var id = entry.getKey();
+    for (final var entry : resources.entrySet()) {
+      final var name = entry.getKey();
       final var state = entry.getValue();
 
-      final var name = id.id();
       final var resource = state.resource();
 
       switch (resource.getType()) {
@@ -676,12 +639,12 @@ public final class SimulationEngine implements AutoCloseable {
   }
 
   /** A handle for processing requests from a modeled resource or condition. */
-  private static final class EngineQuerier implements Querier {
-    private final TaskFrame<JobId> frame;
-    private final Set<Topic<?>> referencedTopics = new HashSet<>();
-    private Optional<Duration> expiry = Optional.empty();
+  public static final class EngineQuerier implements Querier {
+    private final TaskFrame<?> frame;
+    public final Set<Topic<?>> referencedTopics = new HashSet<>();
+    public Optional<Duration> expiry = Optional.empty();
 
-    public EngineQuerier(final TaskFrame<JobId> frame) {
+    public EngineQuerier(final TaskFrame<?> frame) {
       this.frame = Objects.requireNonNull(frame);
     }
 
@@ -758,9 +721,6 @@ public final class SimulationEngine implements AutoCloseable {
     /** A job to step all tasks waiting on a signal. */
     record SignalJobId(SignalId id) implements JobId {}
 
-    /** A job to query a resource. */
-    record ResourceJobId(ResourceId id) implements JobId {}
-
     /** A job to check a condition. */
     record ConditionJobId(ConditionId id) implements JobId {}
 
@@ -770,10 +730,6 @@ public final class SimulationEngine implements AutoCloseable {
 
     static SignalJobId forSignal(final SignalId signal) {
       return new SignalJobId(signal);
-    }
-
-    static ResourceJobId forResource(final ResourceId resource) {
-      return new ResourceJobId(resource);
     }
 
     static ConditionJobId forCondition(final ConditionId condition) {
