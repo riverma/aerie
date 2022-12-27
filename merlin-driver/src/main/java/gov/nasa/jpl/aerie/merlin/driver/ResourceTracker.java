@@ -12,7 +12,6 @@ import gov.nasa.jpl.aerie.merlin.protocol.model.Resource;
 import gov.nasa.jpl.aerie.merlin.protocol.types.Duration;
 
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 
@@ -27,13 +26,11 @@ public class ResourceTracker {
 
   private final TemporalEventSource ourOwnTimeline;
   private final LiveCells cells;
-  private final Iterator<TemporalEventSource.TimePoint> timelineIterator;
   private Duration elapsedTime;
 
-  public ResourceTracker(final TemporalEventSource timeline, final LiveCells initialCells) {
+  public ResourceTracker(final LiveCells initialCells) {
     this.ourOwnTimeline = new TemporalEventSource();
     this.cells = new LiveCells(ourOwnTimeline, initialCells);
-    this.timelineIterator = timeline.iterator();
     this.elapsedTime = Duration.ZERO;
   }
 
@@ -65,17 +62,14 @@ public class ResourceTracker {
   /**
    * Post condition: timeline will be stepped up to the endpoint
    */
-  public void updateResources() {
-    while (timelineIterator.hasNext()) {
-      final var timePoint = timelineIterator.next();
-      if (timePoint instanceof TemporalEventSource.TimePoint.Delta p) {
-        updateExpiredResources(p.delta()); // this call updates ourOwnTimeline and elapsedTime
-      } else if (timePoint instanceof TemporalEventSource.TimePoint.Commit p) {
-        ourOwnTimeline.add(p.events());
-        expireInvalidatedResources(p.topics());
-      } else {
-        throw new Error("Unhandled variant of " + TemporalEventSource.TimePoint.class.getCanonicalName() + ": " + timePoint);
-      }
+  public void updateResources(final TemporalEventSource.TimePoint timePoint) {
+    if (timePoint instanceof TemporalEventSource.TimePoint.Delta p) {
+      updateExpiredResources(p.delta()); // this call updates ourOwnTimeline and elapsedTime
+    } else if (timePoint instanceof TemporalEventSource.TimePoint.Commit p) {
+      ourOwnTimeline.add(p.events());
+      expireInvalidatedResources(p.topics());
+    } else {
+      throw new Error("Unhandled variant of " + TemporalEventSource.TimePoint.class.getCanonicalName() + ": " + timePoint);
     }
   }
 

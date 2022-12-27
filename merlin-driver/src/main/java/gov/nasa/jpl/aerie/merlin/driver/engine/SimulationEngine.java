@@ -74,6 +74,8 @@ public final class SimulationEngine implements AutoCloseable {
   private final TemporalEventSource timeline;
   private final LiveCells cells;
 
+  private Duration elapsedTime = Duration.ZERO;
+
   public SimulationEngine(final TemporalEventSource timeline, final LiveCells initialCells) {
     this.timeline = timeline;
     this.cells = new LiveCells(timeline, initialCells);
@@ -122,9 +124,9 @@ public final class SimulationEngine implements AutoCloseable {
     }
   }
 
-  /** Removes and returns the next set of jobs to be performed concurrently. */
-  public JobSchedule.Batch<JobId> extractNextJobs(final Duration maximumTime) {
-    final var batch = this.scheduledJobs.extractNextJobs(maximumTime);
+  /** Performs a collection of tasks concurrently, extending the given timeline by their stateful effects. */
+  public void step() {
+    final var batch = this.scheduledJobs.extractNextJobs(Duration.MAX_VALUE);
 
     // If we're signaling based on a condition, we need to untrack the condition before any tasks run.
     // Otherwise, we could see a race if one of the tasks running at this time invalidates state
@@ -138,18 +140,13 @@ public final class SimulationEngine implements AutoCloseable {
       this.waitingConditions.unsubscribeQuery(s.id());
     }
 
-    return batch;
-  }
+    this.timeline.add(batch.offsetFromStart().minus(this.elapsedTime));
+    this.elapsedTime = batch.offsetFromStart();
 
-  /** Performs a collection of tasks concurrently, extending the given timeline by their stateful effects. */
-  public void performJobs(
-      final JobSchedule.Batch<JobId> batch,
-      final Duration maximumTime
-  ) {
     var tip = EventGraph.<Event>empty();
     for (final var job$ : batch.jobs()) {
       tip = EventGraph.concurrently(tip, TaskFrame.run(job$, this.cells, (job, frame) -> {
-        this.performJob(job, frame, batch.offsetFromStart(), maximumTime);
+        this.performJob(job, frame, batch.offsetFromStart());
       }));
     }
 
@@ -157,18 +154,17 @@ public final class SimulationEngine implements AutoCloseable {
   }
 
   /** Performs a single job. */
-  public void performJob(
+  private void performJob(
       final JobId job,
       final TaskFrame<JobId> frame,
-      final Duration currentTime,
-      final Duration maximumTime
+      final Duration currentTime
   ) {
     if (job instanceof JobId.TaskJobId j) {
       this.stepTask(j.id(), frame, currentTime);
     } else if (job instanceof JobId.SignalJobId j) {
       this.stepSignalledTasks(j.id(), frame);
     } else if (job instanceof JobId.ConditionJobId j) {
-      this.updateCondition(j.id(), frame, currentTime, maximumTime);
+      this.updateCondition(j.id(), frame, currentTime);
     } else {
       throw new IllegalArgumentException("Unexpected subtype of %s: %s".formatted(JobId.class, job.getClass()));
     }
@@ -293,13 +289,12 @@ public final class SimulationEngine implements AutoCloseable {
   public void updateCondition(
       final ConditionId condition,
       final TaskFrame<JobId> frame,
-      final Duration currentTime,
-      final Duration horizonTime
+      final Duration currentTime
   ) {
     final var querier = new EngineQuerier(frame);
     final var prediction = this.conditions
         .get(condition)
-        .nextSatisfied(querier, horizonTime.minus(currentTime))
+        .nextSatisfied(querier, Duration.MAX_VALUE)
         .map(currentTime::plus);
 
     this.waitingConditions.subscribeQuery(condition, querier.referencedTopics);
@@ -309,7 +304,7 @@ public final class SimulationEngine implements AutoCloseable {
       this.scheduledJobs.schedule(JobId.forSignal(SignalId.forCondition(condition)), SubInstant.Tasks.at(prediction.get()));
     } else {
       // Try checking again later -- where "later" is in some non-zero amount of time!
-      final var nextCheckTime = Duration.max(expiry.orElse(horizonTime), currentTime.plus(Duration.EPSILON));
+      final var nextCheckTime = Duration.max(expiry.orElse(Duration.MAX_VALUE), currentTime.plus(Duration.EPSILON));
       this.scheduledJobs.schedule(JobId.forCondition(condition), SubInstant.Conditions.at(nextCheckTime));
     }
   }
@@ -329,6 +324,13 @@ public final class SimulationEngine implements AutoCloseable {
   /** Determine if a given task has fully completed. */
   public boolean isTaskComplete(final TaskId task) {
     return (this.tasks.get(task) instanceof ExecutionState.Terminated);
+  }
+
+  public boolean hasStuffToDoThrough(final Duration givenTime) {
+    return this.scheduledJobs
+        .min()
+        .map($ -> $.project().noLongerThan(givenTime))
+        .orElse(false);
   }
 
   private record TaskInfo(

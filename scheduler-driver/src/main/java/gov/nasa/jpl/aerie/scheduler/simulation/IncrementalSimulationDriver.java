@@ -82,7 +82,7 @@ public class IncrementalSimulationDriver<Model> {
       engine.scheduleTask(Duration.ZERO, missionModel.getDaemon());
 
       final var batch = engine.extractNextJobs(Duration.MAX_VALUE);
-      final var commit = engine.performJobs(batch.jobs(), cells, curTime, Duration.MAX_VALUE);
+      final var commit = engine.step(batch.jobs(), cells, curTime, Duration.MAX_VALUE);
       timeline.add(commit);
       resourceTracker.invalidateTopics(SimulationDriver.extractTopics(commit));
     }
@@ -110,7 +110,7 @@ public class IncrementalSimulationDriver<Model> {
       }
 
       // Run the jobs in this batch.
-      final var commit = engine.performJobs(batch.jobs(), cells, curTime, Duration.MAX_VALUE);
+      final var commit = engine.step(batch.jobs(), cells, curTime, Duration.MAX_VALUE);
       timeline.add(commit);
       resourceTracker.invalidateTopics(SimulationDriver.extractTopics(commit));
     }
@@ -221,7 +221,7 @@ public class IncrementalSimulationDriver<Model> {
       //   even if they occur at the same real time.
 
       // Run the jobs in this batch.
-      final var commit = engine.performJobs(batch.jobs(), cells, curTime, Duration.MAX_VALUE);
+      final var commit = engine.step(batch.jobs(), cells, curTime, Duration.MAX_VALUE);
       timeline.add(commit);
 
       // all tasks are complete : do not exit yet, there might be event triggered at the same time

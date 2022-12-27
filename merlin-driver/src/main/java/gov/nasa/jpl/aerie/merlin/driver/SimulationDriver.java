@@ -1,18 +1,17 @@
 package gov.nasa.jpl.aerie.merlin.driver;
 
+import gov.nasa.jpl.aerie.json.Unit;
 import gov.nasa.jpl.aerie.merlin.driver.engine.SimulationEngine;
-import gov.nasa.jpl.aerie.merlin.driver.timeline.LiveCells;
 import gov.nasa.jpl.aerie.merlin.driver.timeline.TemporalEventSource;
 import gov.nasa.jpl.aerie.merlin.protocol.driver.Topic;
 import gov.nasa.jpl.aerie.merlin.protocol.model.TaskFactory;
 import gov.nasa.jpl.aerie.merlin.protocol.types.Duration;
 import gov.nasa.jpl.aerie.merlin.protocol.types.InstantiationException;
+import gov.nasa.jpl.aerie.merlin.protocol.types.TaskStatus;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.time.Instant;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 
 public final class SimulationDriver {
   public static <Model>
@@ -25,10 +24,8 @@ public final class SimulationDriver {
     /* The top-level simulation timeline. */
     var timeline = new TemporalEventSource();
     try (final var engine = new SimulationEngine(timeline, missionModel.getInitialCells())) {
-      /* The current real time. */
-      var elapsedTime = Duration.ZERO;
 
-      final var resourceTracker = new ResourceTracker(timeline, missionModel.getInitialCells());
+      final var resourceTracker = new ResourceTracker(missionModel.getInitialCells());
 
       // Begin tracking all resources.
       for (final var entry : missionModel.getResources().entrySet()) {
@@ -39,10 +36,7 @@ public final class SimulationDriver {
 
       // Start daemon task(s) immediately, before anything else happens.
       engine.scheduleTask(Duration.ZERO, missionModel.getDaemon());
-      {
-        final var batch = engine.extractNextJobs(Duration.MAX_VALUE);
-        engine.performJobs(batch, Duration.MAX_VALUE);
-      }
+      engine.step();
 
       // Specify a topic on which tasks can log the activity they're associated with.
       final var activityTopic = new Topic<ActivityInstanceId>();
@@ -65,55 +59,42 @@ public final class SimulationDriver {
         final var taskId = engine.scheduleTask(startOffset, emitAndThen(directiveId, activityTopic, task));
       }
 
+      // The sole purpose of this task is to make sure the simulation has "stuff to do" until the simulationDuration.
+      engine.scheduleTask(Duration.ZERO, executor -> $ ->
+          TaskStatus.delayed(
+              simulationDuration,
+              $$ -> TaskStatus.completed(Unit.UNIT)));
+
       // Drive the engine until we're out of time.
       // TERMINATION: Actually, we might never break if real time never progresses forward.
-      // TODO: Advance a dense time counter so that future tasks are strictly ordered relative to these,
-      //   even if they occur at the same real time.
-      while (true) {
-        final var batch = engine.extractNextJobs(simulationDuration);
+      while (engine.hasStuffToDoThrough(simulationDuration)) {
+        engine.step();
+      }
 
-        timeline.add(batch.offsetFromStart().minus(elapsedTime));
-        engine.performJobs(batch, simulationDuration);
-        resourceTracker.updateResources();
-
-        elapsedTime = batch.offsetFromStart();
-        if (batch.jobs().isEmpty()) break;
+      // Replay the timeline to collect resource profiles
+      for (final var timePoint : timeline) {
+        resourceTracker.updateResources(timePoint);
       }
 
       final var topics = missionModel.getTopics();
-      return SimulationEngine.computeResults(engine, startTime, elapsedTime, activityTopic, timeline, topics, resourceTracker.resourceProfiles());
+      return SimulationEngine.computeResults(engine, startTime, simulationDuration, activityTopic, timeline, topics, resourceTracker.resourceProfiles());
     }
   }
 
   public static <Model, Return>
   void simulateTask(final MissionModel<Model> missionModel, final TaskFactory<Return> task) {
     /* The top-level simulation timeline. */
-    var timeline = new TemporalEventSource();
-    var cells = new LiveCells(timeline, missionModel.getInitialCells());
-    try (final var engine = new SimulationEngine(timeline, cells)) {
-      /* The current real time. */
-      var elapsedTime = Duration.ZERO;
-
+    final var timeline = new TemporalEventSource();
+    try (final var engine = new SimulationEngine(timeline, missionModel.getInitialCells())) {
       // Start daemon task(s) immediately, before anything else happens.
       engine.scheduleTask(Duration.ZERO, missionModel.getDaemon());
-      {
-        final var batch = engine.extractNextJobs(Duration.MAX_VALUE);
-        engine.performJobs(batch, Duration.MAX_VALUE);
-      }
-
-      // Schedule all activities.
-      final var taskId = engine.scheduleTask(elapsedTime, task);
+      engine.step();
 
       // Drive the engine until we're out of time.
       // TERMINATION: Actually, we might never break if real time never progresses forward.
-      while (true) {
-        final var batch = engine.extractNextJobs(Duration.MAX_VALUE);
-
-        timeline.add(batch.offsetFromStart().minus(elapsedTime));
-        engine.performJobs(batch, Duration.MAX_VALUE);
-
-        elapsedTime = batch.offsetFromStart();
-        if (engine.isTaskComplete(taskId)) break;
+      final var taskId = engine.scheduleTask(Duration.ZERO, task);
+      while (!engine.isTaskComplete(taskId)) {
+        engine.step();
       }
     }
   }
@@ -124,11 +105,5 @@ public final class SimulationDriver {
       scheduler.emit(event, topic);
       return continuation.create(executor).step(scheduler);
     };
-  }
-
-  private static <E> Set<E> union(Set<E> a, Set<E> b) {
-    final var res = new HashSet<>(a);
-    res.addAll(b);
-    return res;
   }
 }
