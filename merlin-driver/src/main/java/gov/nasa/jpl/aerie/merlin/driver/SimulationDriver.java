@@ -22,18 +22,8 @@ public final class SimulationDriver {
       final Duration simulationDuration
   ) {
     /* The top-level simulation timeline. */
-    var timeline = new TemporalEventSource();
+    final var timeline = new TemporalEventSource();
     try (final var engine = new SimulationEngine(timeline, missionModel.getInitialCells())) {
-
-      final var resourceTracker = new ResourceTracker(missionModel.getInitialCells());
-
-      // Begin tracking all resources.
-      for (final var entry : missionModel.getResources().entrySet()) {
-        final var name = entry.getKey();
-        final var resource = entry.getValue();
-        resourceTracker.track(name, resource);
-      }
-
       // Start daemon task(s) immediately, before anything else happens.
       engine.scheduleTask(Duration.ZERO, missionModel.getDaemon());
       engine.step();
@@ -72,6 +62,12 @@ public final class SimulationDriver {
       }
 
       // Replay the timeline to collect resource profiles
+      final var resourceTracker = new ResourceTracker(timeline, missionModel.getInitialCells());
+      for (final var entry : missionModel.getResources().entrySet()) {
+        final var name = entry.getKey();
+        final var resource = entry.getValue();
+        resourceTracker.track(name, resource);
+      }
       for (final var timePoint : timeline) {
         resourceTracker.updateResources(timePoint);
       }
