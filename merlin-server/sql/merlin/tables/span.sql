@@ -44,6 +44,12 @@ create or replace function span_integrity_function()
   return new;
 end$$;
 
+comment on function span_integrity_function is e''
+  'Used to simulate a foreign key constraint between span and dataset, to avoid acquiring a lock on the'
+  'dataset table when creating a new partition of span. This function checks that a corresponding dataset'
+  'exists for every inserted or updated span. A trigger that calls this function is added separately to each'
+  'new partition of span.';
+
 create constraint trigger insert_update_span_trigger
   after insert or update on span
   for each row

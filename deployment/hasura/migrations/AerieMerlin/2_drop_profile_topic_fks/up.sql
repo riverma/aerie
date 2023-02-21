@@ -31,6 +31,14 @@ create trigger delete_profile_trigger
   for each row
 execute function delete_profile_cascade();
 
+comment on trigger delete_profile_trigger on profile is e''
+  'Trigger to simulate an ON DELETE CASCADE foreign key constraint between profile_segment and profile. The reason to'
+  'implement this as a trigger is that this single trigger can cascade deletes to any partitions of profile_segment.'
+  'If we used a foreign key, every new partition of profile_segment would need to add a new cascade delete trigger to'
+  'the profile table - which requires acquiring a lock that conflicts with concurrent inserts. In order to allow adding'
+  'new partitions concurrently with inserts to referenced tables, we have chosen to forego foreign keys from partitions'
+  'to other tables in favor of these hand-written triggers';
+
 create or replace function update_profile_cascade()
   returns trigger
   security invoker
@@ -50,6 +58,14 @@ create trigger update_profile_trigger
   for each row
 execute function update_profile_cascade();
 
+comment on trigger update_profile_trigger on profile is e''
+  'Trigger to simulate an ON UPDATE CASCADE foreign key constraint between profile_segment and profile. The reason to'
+  'implement this as a trigger is that this single trigger can propagate updates to any partitions of profile_segment.'
+  'If we used a foreign key, every new partition of profile_segment would need to add a new trigger to the profile'
+  'table - which requires acquiring a lock that conflicts with concurrent inserts. In order to allow adding new'
+  'partitions concurrently with inserts to referenced tables, we have chosen to forego foreign keys from partitions'
+  'to other tables in favor of these hand-written triggers';
+
 create or replace function delete_topic_cascade()
   returns trigger
   security invoker
@@ -63,6 +79,14 @@ create trigger delete_topic_trigger
   after delete on topic
   for each row
 execute function delete_topic_cascade();
+
+comment on trigger delete_topic_trigger on topic is e''
+  'Trigger to simulate an ON DELETE CASCADE foreign key constraint between event and topic. The reason to'
+  'implement this as a trigger is that this single trigger can cascade deletes to any partitions of event.'
+  'If we used a foreign key, every new partition of event would need to add a new trigger to the topic'
+  'table - which requires acquiring a lock that conflicts with concurrent inserts. In order to allow adding new'
+  'partitions concurrently with inserts to referenced tables, we have chosen to forego foreign keys from partitions'
+  'to other tables in favor of these hand-written triggers';
 
 create or replace function update_topic_cascade()
   returns trigger
@@ -83,6 +107,14 @@ create trigger update_topic_trigger
   for each row
 execute function update_topic_cascade();
 
+comment on trigger update_topic_trigger on topic is e''
+  'Trigger to simulate an ON UPDATE CASCADE foreign key constraint between event and topic. The reason to'
+  'implement this as a trigger is that this single trigger can propagate updates to any partitions of event.'
+  'If we used a foreign key, every new partition of event would need to add a new trigger to the topic'
+  'table - which requires acquiring a lock that conflicts with concurrent inserts. In order to allow adding new'
+  'partitions concurrently with inserts to referenced tables, we have chosen to forego foreign keys from partitions'
+  'to other tables in favor of these hand-written triggers';
+
 create or replace function profile_segment_integrity_function()
   returns trigger
   security invoker
@@ -92,11 +124,19 @@ create or replace function profile_segment_integrity_function()
       where profile.dataset_id = new.dataset_id
       and profile.id = new.profile_id
     for key share of profile)
+    -- for key share is important: it makes sure that concurrent transactions cannot update
+    -- the columns that compose the profile's key until after this transaction commits.
   then
     raise exception 'foreign key violation: there is no profile with id % in dataset %', new.profile_id, new.dataset_id;
   end if;
   return new;
 end$$;
+
+comment on function profile_segment_integrity_function is e''
+  'Used to simulate a foreign key constraint between profile_segment and profile, to avoid acquiring a lock on the'
+  'profile table when creating a new partition of profile_segment. This function checks that a corresponding profile'
+  'exists for every inserted or updated profile_segment. A trigger that calls this function is added separately to each'
+  'new partition of profile_segment.';
 
 create constraint trigger insert_update_profile_segment_trigger
   after insert or update on profile_segment
@@ -112,11 +152,19 @@ create or replace function event_integrity_function()
       where topic.dataset_id = new.dataset_id
       and topic.topic_index = new.topic_index
     for key share of topic)
+    -- for key share is important: it makes sure that concurrent transactions cannot update
+    -- the columns that compose the topic's key until after this transaction commits.
   then
     raise exception 'foreign key violation: there is no topic with topic_index % in dataset %', new.topic_index, new.dataset_id;
   end if;
   return new;
 end$$;
+
+comment on function event_integrity_function is e''
+  'Used to simulate a foreign key constraint between event and topic, to avoid acquiring a lock on the'
+  'topic table when creating a new partition of event. This function checks that a corresponding topic'
+  'exists for every inserted or updated event. A trigger that calls this function is added separately to each'
+  'new partition of event.';
 
 create constraint trigger insert_update_event_trigger
   after insert or update on event
@@ -133,6 +181,12 @@ create or replace function span_integrity_function()
   end if;
   return new;
 end$$;
+
+comment on function span_integrity_function is e''
+  'Used to simulate a foreign key constraint between span and dataset, to avoid acquiring a lock on the'
+  'dataset table when creating a new partition of span. This function checks that a corresponding dataset'
+  'exists for every inserted or updated span. A trigger that calls this function is added separately to each'
+  'new partition of span.';
 
 create constraint trigger insert_update_span_trigger
   after insert or update on span
@@ -164,6 +218,14 @@ create trigger delete_dataset_trigger
   after delete on dataset
   for each row
 execute function delete_dataset_cascade();
+
+comment on trigger delete_dataset_trigger on dataset is e''
+  'Trigger to simulate an ON DELETE CASCADE foreign key constraint between span and dataset. The reason to'
+  'implement this as a trigger is that this single trigger can cascade deletes to any partitions of span.'
+  'If we used a foreign key, every new partition of span would need to add a new trigger to the dataset'
+  'table - which requires acquiring a lock that conflicts with concurrent inserts. In order to allow adding new'
+  'partitions concurrently with inserts to referenced tables, we have chosen to forego foreign keys from partitions'
+  'to other tables in favor of these hand-written triggers';
 
 create or replace function allocate_dataset_partitions(dataset_id integer)
   returns dataset

@@ -48,6 +48,14 @@ create trigger delete_topic_trigger
   for each row
 execute function delete_topic_cascade();
 
+comment on trigger delete_topic_trigger on topic is e''
+  'Trigger to simulate an ON DELETE CASCADE foreign key constraint between event and topic. The reason to'
+  'implement this as a trigger is that this single trigger can cascade deletes to any partitions of event.'
+  'If we used a foreign key, every new partition of event would need to add a new trigger to the topic'
+  'table - which requires acquiring a lock that conflicts with concurrent inserts. In order to allow adding new'
+  'partitions concurrently with inserts to referenced tables, we have chosen to forego foreign keys from partitions'
+  'to other tables in favor of these hand-written triggers';
+
 create or replace function update_topic_cascade()
   returns trigger
   security invoker
@@ -65,4 +73,12 @@ end$$;
 create trigger update_topic_trigger
   after update on topic
   for each row
-execute function update_topic_cascade()
+execute function update_topic_cascade();
+
+comment on trigger update_topic_trigger on topic is e''
+  'Trigger to simulate an ON UPDATE CASCADE foreign key constraint between event and topic. The reason to'
+  'implement this as a trigger is that this single trigger can propagate updates to any partitions of event.'
+  'If we used a foreign key, every new partition of event would need to add a new trigger to the topic'
+  'table - which requires acquiring a lock that conflicts with concurrent inserts. In order to allow adding new'
+  'partitions concurrently with inserts to referenced tables, we have chosen to forego foreign keys from partitions'
+  'to other tables in favor of these hand-written triggers';

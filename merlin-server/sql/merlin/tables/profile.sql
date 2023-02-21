@@ -42,6 +42,14 @@ create trigger delete_profile_trigger
   for each row
 execute function delete_profile_cascade();
 
+comment on trigger delete_profile_trigger on profile is e''
+  'Trigger to simulate an ON DELETE CASCADE foreign key constraint between profile_segment and profile. The reason to'
+  'implement this as a trigger is that this single trigger can cascade deletes to any partitions of profile_segment.'
+  'If we used a foreign key, every new partition of profile_segment would need to add a new cascade delete trigger to'
+  'the profile table - which requires acquiring a lock that conflicts with concurrent inserts. In order to allow adding'
+  'new partitions concurrently with inserts to referenced tables, we have chosen to forego foreign keys from partitions'
+  'to other tables in favor of these hand-written triggers';
+
 create or replace function update_profile_cascade()
   returns trigger
   security invoker
@@ -60,3 +68,11 @@ create trigger update_profile_trigger
   after update on profile
   for each row
 execute function update_profile_cascade();
+
+comment on trigger update_profile_trigger on profile is e''
+  'Trigger to simulate an ON UPDATE CASCADE foreign key constraint between profile_segment and profile. The reason to'
+  'implement this as a trigger is that this single trigger can propagate updates to any partitions of profile_segment.'
+  'If we used a foreign key, every new partition of profile_segment would need to add a new trigger to the profile'
+  'table - which requires acquiring a lock that conflicts with concurrent inserts. In order to allow adding new'
+  'partitions concurrently with inserts to referenced tables, we have chosen to forego foreign keys from partitions'
+  'to other tables in favor of these hand-written triggers';

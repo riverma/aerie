@@ -47,11 +47,19 @@ create or replace function profile_segment_integrity_function()
       where profile.dataset_id = new.dataset_id
       and profile.id = new.profile_id
     for key share of profile)
+    -- for key share is important: it makes sure that concurrent transactions cannot update
+    -- the columns that compose the profile's key until after this transaction commits.
   then
     raise exception 'foreign key violation: there is no profile with id % in dataset %', new.profile_id, new.dataset_id;
   end if;
   return new;
 end$$;
+
+comment on function profile_segment_integrity_function is e''
+  'Used to simulate a foreign key constraint between profile_segment and profile, to avoid acquiring a lock on the'
+  'profile table when creating a new partition of profile_segment. This function checks that a corresponding profile'
+  'exists for every inserted or updated profile_segment. A trigger that calls this function is added separately to each'
+  'new partition of profile_segment.';
 
 create constraint trigger insert_update_profile_segment_trigger
   after insert or update on profile_segment
