@@ -1,3 +1,5 @@
+drop function allocate_dataset_partitions;
+
 drop trigger if exists delete_dataset_trigger on dataset;
 drop function if exists delete_dataset_cascade;
 

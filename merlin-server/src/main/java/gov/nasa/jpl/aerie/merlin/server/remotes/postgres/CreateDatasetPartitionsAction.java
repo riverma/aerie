@@ -3,21 +3,23 @@ package gov.nasa.jpl.aerie.merlin.server.remotes.postgres;
 import org.intellij.lang.annotations.Language;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
 
-/*package-local*/ final class CreateProfileSegmentPartitionAction implements AutoCloseable {
-  private final Connection connection;
+/*package-local*/ final class CreateDatasetPartitionsAction implements AutoCloseable {
+  private static final @Language("SQL") String sql = """
+    select from allocate_dataset_partitions(?);
+  """;
 
-  public CreateProfileSegmentPartitionAction(final Connection connection) throws SQLException {
-    this.connection = connection;
+  private final PreparedStatement statement;
+
+  public CreateDatasetPartitionsAction(final Connection connection) throws SQLException {
+    this.statement = connection.prepareStatement(sql);
   }
 
   public void apply(final long datasetId) throws SQLException {
-    final var generatedSql = generateSql(datasetId);
-
-    try (final var statement = connection.createStatement()) {
-      statement.executeUpdate(generatedSql);
-    }
+    this.statement.setLong(1, datasetId);
+    this.statement.executeUpdate();
   }
 
   private static String generateSql(final long datasetId) {
