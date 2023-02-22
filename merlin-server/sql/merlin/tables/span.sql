@@ -10,17 +10,7 @@ create table span (
   attributes jsonb not null,
 
   constraint span_synthetic_key
-    primary key (dataset_id, id),
-  constraint span_owned_by_dataset
-    foreign key (dataset_id)
-    references dataset
-    on update cascade
-    on delete cascade,
-  constraint span_has_parent_span
-    foreign key (dataset_id, parent_id)
-    references span
-    on update cascade
-    on delete cascade
+    primary key (dataset_id, id)
 )
 partition by list (dataset_id);
 
@@ -42,3 +32,19 @@ comment on column span.type is e''
   'The type of span, implying the shape of its attributes.';
 comment on column span.attributes is e''
   'A set of named values annotating this span as a whole.';
+
+create or replace function span_integrity_function()
+  returns trigger
+  security invoker
+  language plpgsql as $$begin
+  if not exists(select from dataset where dataset.id = new.dataset_id for key share of dataset)
+  then
+    raise exception 'foreign key violation: there is no dataset with id %', new.dataset_id;
+  end if;
+  return new;
+end$$;
+
+create constraint trigger insert_update_span_trigger
+  after insert or update on span
+  for each row
+execute function span_integrity_function();

@@ -32,3 +32,16 @@ create trigger delete_partitions_trigger
 exception
   when duplicate_object then null;
 end $$;
+
+create or replace function delete_dataset_cascade()
+  returns trigger
+  security definer
+  language plpgsql as $$begin
+    delete from span where span.dataset_id = old.id;
+    return old;
+end$$;
+
+create trigger delete_dataset_trigger
+  after delete on dataset
+  for each row
+  execute function delete_dataset_cascade();

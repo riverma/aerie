@@ -33,3 +33,36 @@ comment on column topic.value_schema is e''
   'The value schema describing the value of this topic';
 comment on column topic.name is e''
   'The human readable name of this topic';
+
+create or replace function delete_topic_cascade()
+  returns trigger
+  security invoker
+  language plpgsql as $$begin
+  delete from event
+  where event.topic_index = old.topic_index and event.dataset_id = old.dataset_id;
+  return old;
+end$$;
+
+create trigger delete_topic_trigger
+  after delete on topic
+  for each row
+execute function delete_topic_cascade();
+
+create or replace function update_topic_cascade()
+  returns trigger
+  security invoker
+  language plpgsql as $$begin
+  if old.topic_index != new.topic_index or old.dataset_id != new.dataset_id
+  then
+    update event
+    set topic_index = new.topic_index,
+        dataset_id = new.dataset_id
+    where event.dataset_id = old.dataset_id and event.topic_index = old.topic_index;
+  end if;
+  return new;
+end$$;
+
+create trigger update_topic_trigger
+  after update on topic
+  for each row
+execute function update_topic_cascade()

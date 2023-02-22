@@ -9,12 +9,7 @@ create table event
   topic_index integer not null,
 
   constraint event_natural_key
-    primary key (dataset_id, real_time, transaction_index, causal_time),
-  constraint event_owned_by_topic
-    foreign key (dataset_id, topic_index)
-      references topic
-      on update cascade
-      on delete cascade
+    primary key (dataset_id, real_time, transaction_index, causal_time)
 )
 partition by list (dataset_id);
 
@@ -32,3 +27,23 @@ comment on column event.value is e''
   'The value of this event as a json blob';
 comment on column event.topic_index is e''
   'The topic of this event';
+
+create or replace function event_integrity_function()
+  returns trigger
+  security invoker
+  language plpgsql as $$begin
+  if not exists(
+    select from topic
+      where topic.dataset_id = new.dataset_id
+      and topic.topic_index = new.topic_index
+    for key share of topic)
+  then
+    raise exception 'foreign key violation: there is no topic with topic_index % in dataset %', new.topic_index, new.dataset_id;
+  end if;
+  return new;
+end$$;
+
+create constraint trigger insert_update_event_trigger
+  after insert or update on event
+  for each row
+execute function event_integrity_function();
