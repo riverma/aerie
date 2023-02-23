@@ -122,18 +122,22 @@ public abstract class HasuraParsers {
   public static final JsonParser<HasuraAction<HasuraAction.ActivityInput>> hasuraActivityActionP
       = hasuraActionF(hasuraActivityInputP);
 
-  public static final JsonParser<HasuraAction.UploadExternalDatasetInput> hasuraUploadExternalDatasetActionP
-      = productP
-      .field("planId", planIdP)
-      .field("datasetStart", timestampP)
-      .field("profileSet", profileSetP)
-      .map(
-          untuple(HasuraAction.UploadExternalDatasetInput::new),
-          $ -> tuple($.planId(), $.datasetStart(), $.profileSet()));
+  public static final JsonParser<HasuraAction<HasuraAction.UploadExternalDatasetInput>> hasuraUploadExternalDatasetActionP
+      = hasuraActionF(
+          productP
+            .field("planId", planIdP)
+            .field("datasetStart", timestampP)
+            .field("profileSet", profileSetP)
+            .map(
+                untuple(HasuraAction.UploadExternalDatasetInput::new),
+                $ -> tuple($.planId(), $.datasetStart(), $.profileSet())));
 
-  public static final JsonParser<HasuraAction<HasuraAction.UploadExternalDatasetInput>> hasuraExternalDatasetActionP
-      = hasuraActionP(hasuraUploadExternalDatasetActionP)
-      .map(
-          untuple((name, input, session, requestQuery) -> new HasuraAction<>(name, input, session)),
-          $ -> tuple($.name(), $.input(), $.session(), ""));
+  public static final JsonParser<HasuraAction<HasuraAction.ExtendExternalDatasetInput>> hasuraExtendExternalDatasetActionP
+      = hasuraActionF(
+          productP
+            .field("datasetId", datasetIdP)
+            .field("profileSet", profileSetP)
+            .map(
+                untuple(HasuraAction.ExtendExternalDatasetInput::new),
+                $ -> tuple($.datasetId(), $.profileSet())));
 }

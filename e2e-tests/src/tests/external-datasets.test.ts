@@ -22,7 +22,32 @@ test.describe('External Datasets', () => {
       ]
     }
   };
-  const profile_set_result = {
+
+  const profile_set_extension = {
+    "/my_boolean": {
+      type: "discrete",
+      schema: {
+        type: "boolean"
+      },
+      segments: [
+        {duration: 1800000000, "dynamics": false},
+        {duration: 1800000000, "dynamics": true},
+      ]
+    },
+    "/new_profile": {
+      type: "discrete",
+      schema: {
+        type: "boolean"
+      },
+      segments: [
+        {duration: 1800000000, "dynamics": true},
+        {duration: 1800000000, "dynamics": false},
+        {duration: 1800000000},
+        {duration: 1800000000, "dynamics": true}
+      ]
+    }
+  };
+  const profile_set_result_1 = {
     plan_dataset_by_pk: {
       offset_from_plan_start: "06:00:00",
       dataset: {
@@ -48,6 +73,68 @@ test.describe('External Datasets', () => {
               {
                 start_offset: "04:00:00",
                 dynamics: false
+              }
+            ]
+          }
+        ]
+      }
+    }
+  };
+
+  const profile_set_result_2 = {
+    plan_dataset_by_pk: {
+      offset_from_plan_start: "06:00:00",
+      dataset: {
+        profiles: [
+          {
+            profile_segments: [
+              {
+                start_offset: "00:00:00",
+                dynamics: false
+              },
+              {
+                start_offset: "01:00:00",
+                dynamics: null
+              },
+              {
+                start_offset: "02:00:00",
+                dynamics: true
+              },
+              {
+                start_offset: "03:00:00",
+                dynamics: null
+              },
+              {
+                start_offset: "04:00:00",
+                dynamics: false
+              },
+              {
+                start_offset: "05:00:00",
+                dynamics: false
+              },
+              {
+                start_offset: "05:30:00",
+                dynamics: true
+              }
+            ]
+          },
+          {
+            profile_segments: [
+              {
+                start_offset: "00:00:00",
+                dynamics: true
+              },
+              {
+                start_offset: "00:30:00",
+                dynamics: false
+              },
+              {
+                start_offset: "01:00:00",
+                dynamics: null
+              },
+              {
+                start_offset: "01:30:00",
+                dynamics: true
               }
             ]
           }
@@ -101,12 +188,32 @@ test.describe('External Datasets', () => {
     expect(typeof dataset_id).toEqual("number");
   });
 
-  test('Query External Dataset', async ({ request }) => {
+  test('Query External Dataset 1', async ({ request }) => {
     const getExternalDatasetInput: ExternalDatasetQueryInput = { plan_id, dataset_id };
 
     const result = await req.getExternalDataset(request, getExternalDatasetInput);
 
-    expect(result).toEqual(profile_set_result);
+    expect(result).toEqual(profile_set_result_1);
+  });
+
+  test('Extend External Dataset', async ({ request }) => {
+    const externalDatasetInput: ExternalDatasetExtendInput = {
+      dataset_id,
+      profile_set: profile_set_extension
+    };
+
+    dataset_id = await req.extendExternalDataset(request, externalDatasetInput);
+    expect(dataset_id).not.toBeNull();
+    expect(dataset_id).toBeDefined();
+    expect(typeof dataset_id).toEqual("number");
+  });
+
+  test('Query External Dataset 2', async ({ request }) => {
+    const getExternalDatasetInput: ExternalDatasetQueryInput = { plan_id, dataset_id };
+
+    const result = await req.getExternalDataset(request, getExternalDatasetInput);
+
+    expect(result).toEqual(profile_set_result_2);
   });
 
   test('Delete External Dataset', async ({ request }) => {
