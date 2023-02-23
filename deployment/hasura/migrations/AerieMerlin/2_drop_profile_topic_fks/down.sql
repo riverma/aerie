@@ -1,3 +1,5 @@
+drop procedure span_add_foreign_key_to_partition;
+
 drop function allocate_dataset_partitions;
 
 drop trigger if exists delete_dataset_trigger on dataset;
